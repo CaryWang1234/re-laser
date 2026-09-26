@@ -1,0 +1,60 @@
+export const COLORS = {
+  bg: '#1a1a2e',
+  gridLine: '#2a2a3e',
+  gridDot: '#3a3a4e',
+  wall: '#4a4a5e',
+  wallBorder: '#5a5a6e',
+  battery: '#f0c040',
+  batteryCharge: '#40f080',
+  batteryBg: '#3a3020',
+  emitter: '#e0e0e0',
+  emitterGlow: '#ffffff',
+  laserNormal: '#ff3333',
+  laserPower: '#3399ff',
+  mirror: '#c0c0d0',
+  mirrorRotate: '#80f0a0',
+  obstacleNormal: '#8b3030',
+  obstacleNormalBorder: '#a04040',
+  obstacleReinforced: '#304080',
+  obstacleReinforcedBorder: '#4060a0',
+  obstacleDestroyed: '#2a2a3e',
+  textPrimary: '#e0e0e0',
+  textSecondary: '#808090',
+  textHighlight: '#f0c040',
+  uiPanel: '#22223a',
+  uiPanelBorder: '#3a3a5e',
+  uiButton: '#3a3a5e',
+  uiButtonHover: '#4a4a6e',
+  uiButtonText: '#e0e0e0',
+  starFilled: '#f0c040',
+  starEmpty: '#3a3a4e',
+  success: '#40f080',
+  danger: '#ff4040',
+} as const;
+
+export const RENDER = {
+  cellSize: 60,
+  gridPadding: 40,
+  laserWidth: 3,
+  laserGlow: 12,
+  laserPowerWidth: 5,
+  laserPowerGlow: 18,
+  laserAnimSpeed: 10,
+  destroyAnimDuration: 400,
+  chargePulseDuration: 600,
+  mirrorLineWidth: 3,
+  elementPadding: 8,
+} as const;
+
+export const RULES = {
+  normalLaserCost: 1,
+  powerLaserCost: 3,
+  chargePerTurn: 1,
+  maxLaserSteps: 200,
+} as const;
+
+export const STORAGE = {
+  records: 're-laser-records',
+  workshop: 're-laser-workshop',
+  settings: 're-laser-settings',
+} as const;
