@@ -2,7 +2,17 @@
 import { Game } from '../src/models/Game';
 import { EmitterMode, MirrorOrientation } from '../src/types/elements';
 import { coordKey } from '../src/types';
+import { circuitPlans, applyEdits } from './circuit-plans';
+import { isLevelData } from '../src/workshop/Schema';
 for (const level of allLevels) {
+  if (!isLevelData(level)) { console.error(level.id, 'invalid layout or circuit links'); process.exitCode = 1; continue; }
+  if (circuitPlans[level.id]) {
+    const game = new Game(level);
+    for (const edits of circuitPlans[level.id]) { applyEdits(game, edits); game.fire(); }
+    console.log(level.id, `${level.gridWidth}×${level.gridHeight}`, game.result, `${game.turnState.turnCount} turns`, `${game.sensors.filter(s=>s.active).length}/${game.sensors.length} sensors`);
+    if (game.result !== 'WIN') process.exitCode = 1;
+    continue;
+  }
   const seen = new Set<string>();
   const duplicates = level.elements.filter(e => { const key = coordKey(e.coord); if(seen.has(key)) return true; seen.add(key); return false; });
   const reached = new Set<string>();

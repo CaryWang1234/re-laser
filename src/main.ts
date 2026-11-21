@@ -11,6 +11,8 @@ import { encodeLevel, decodeLevel, extractShareFromUrl } from './workshop/ShareC
 import { solveLevel } from './workshop/Solver';
 import { Game } from './models/Game';
 import './style.css';
+import { deviceInfo } from './renderer/DeviceInfo';
+import { isLevelData } from './workshop/Schema';
 
 class App {
   private canvas: HTMLCanvasElement;
@@ -30,6 +32,8 @@ class App {
   // Editor state
   private editorTool: ElementPlacement['type'] | 'erase' | null = null;
   private editorElements: ElementPlacement[] = [];
+  private editorChannel = 'A';
+  private testingEditor = false;
   private editorGridW = 8;
   private editorGridH = 6;
   private editorMaxTurns = 10;
@@ -76,7 +80,14 @@ class App {
     this.renderer.resize(w, h);
     if (this.state.game) {
       const g = this.state.game;
+      if (this.state.currentScreen === 'EDITOR') {
+        const toolbar = this.uiLayer.querySelector('.editor-tools');
+        this.renderer.boardTop = Math.max(130, (toolbar?.getBoundingClientRect().bottom || 90) + 48);
+        this.renderer.boardBottom = 30;
+      }
       this.renderer.calcGridOffset(w, h, g.grid.width, g.grid.height);
+      const view = this.uiLayer.querySelector<HTMLElement>('.view-controls');
+      if (view) view.style.top = (this.renderer.boardTop + 4) + 'px';
     }
   }
 
@@ -90,7 +101,10 @@ class App {
       if (key === 'r') this.restart();
       if (key === 'p') this.togglePreview();
       if (key === 'h' || key === '?') this.showHelp();
-      if (e.key === 'Escape') this.showScreen('LEVEL_SELECT');
+      if (e.key === 'Escape') this.leaveGame();
+      if (key === '+' || key === '=') this.renderer.zoomBy(1.25);
+      if (key === '-') this.renderer.zoomBy(.8);
+      if (key === '0') this.renderer.resetView();
       if (e.key.startsWith('Arrow') && this.state.game) {
         e.preventDefault();
         const grid = this.state.game.grid;
@@ -106,23 +120,42 @@ class App {
       const interactive = c && (this.state.game.mirrors.some(m => coordKey(m.coord) === coordKey(c) && m.rotatable) || this.state.game.emitters.some(m => coordKey(m.coord) === coordKey(c)));
       this.canvas.style.cursor = interactive ? 'pointer' : 'default';
     });
-    // Mouse click
-    this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
-
-    // Touch support
-    this.canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      const rect = this.canvas.getBoundingClientRect();
-      const fakeEvent = { clientX: touch.clientX, clientY: touch.clientY } as MouseEvent;
-      this.handleCanvasClick(fakeEvent);
-    }, { passive: false });
+    this.canvas.style.touchAction = 'none';
+    const pointers = new Map<number, {x:number;y:number}>();
+    let start = {x:0,y:0}, last = start, moved = false, pinched = false, pinchDistance = 0;
+    this.canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); this.canvas.setPointerCapture(e.pointerId);
+      if (pointers.size === 1) { start=last={x:e.clientX,y:e.clientY}; moved=false; pinched=false; }
+      else { pinched=true; const p=[...pointers.values()]; pinchDistance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y); }
+    });
+    this.canvas.addEventListener('pointermove', e => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if (pointers.size===2) {
+        const p=[...pointers.values()]; const distance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
+        if(pinchDistance>0) this.renderer.zoomBy(distance/pinchDistance); pinchDistance=distance; return;
+      }
+      if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>6) moved=true;
+      if(moved) this.renderer.panBy(e.clientX-last.x,e.clientY-last.y);
+      last={x:e.clientX,y:e.clientY};
+    });
+    this.canvas.addEventListener('pointerup', e => {
+      if(pointers.has(e.pointerId) && !moved && !pinched) this.handleCanvasClick(e);
+      pointers.delete(e.pointerId);
+    });
+    this.canvas.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); moved=true; });
+    this.canvas.addEventListener('wheel', e => {
+      if(!['PLAYING','EDITOR'].includes(this.state.currentScreen)) return;
+      e.preventDefault(); this.renderer.zoomBy(e.deltaY<0?1.15:1/1.15);
+    }, {passive:false});
   }
 
   private handleCanvasClick(e: MouseEvent): void {
     const rect = this.canvas.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+    if (py < this.renderer.boardTop || py > window.innerHeight - this.renderer.boardBottom) return;
 
     if (this.state.currentScreen === 'PLAYING' && this.state.game) {
       const coord = this.renderer.pixelToGrid(px, py);
@@ -142,7 +175,10 @@ class App {
     const existing = this.editorElements.find(el => coordKey(el.coord) === key);
     if (existing && existing.type === this.editorTool) {
       if (existing.type === 'mirror') existing.orientation = existing.orientation === MirrorOrientation.SLASH ? MirrorOrientation.BACKSLASH : MirrorOrientation.SLASH;
-      if (existing.type === 'emitter') {
+      if (existing.type === 'sensor') { existing.latched=!existing.latched; existing.channel=this.editorChannel; }
+      if (existing.type === 'gate') { existing.inverted=!existing.inverted; existing.channel=this.editorChannel; }
+      if (existing.type === 'portal') existing.channel=this.editorChannel;
+      if (existing.type === 'emitter' || existing.type === 'diode') {
         const directions = [Direction.RIGHT, Direction.DOWN, Direction.LEFT, Direction.UP];
         existing.facing = directions[(directions.indexOf(existing.facing) + 1) % 4];
       }
@@ -154,6 +190,12 @@ class App {
 
     // Add new element based on tool
     switch (this.editorTool) {
+      case 'converter': this.editorElements.push({type:'converter',coord,capacity:9}); break;
+      case 'wire': case 'splitter': this.editorElements.push({type:this.editorTool,coord}); break;
+      case 'sensor': this.editorElements.push({type:'sensor',coord,channel:this.editorChannel,latched:false}); break;
+      case 'gate': this.editorElements.push({type:'gate',coord,channel:this.editorChannel,inverted:false}); break;
+      case 'portal': this.editorElements.push({type:'portal',coord,channel:this.editorChannel}); break;
+      case 'diode': this.editorElements.push({type:'diode',coord,facing:Direction.RIGHT}); break;
       case 'battery':
         this.editorElements.push({ type: 'battery', coord, capacity: 5 });
         break;
@@ -189,7 +231,10 @@ class App {
     };
 
     this.state.game = new Game(tempLevel);
+    this.renderer.boardTop=Math.max(130,(this.uiLayer.querySelector('.editor-tools')?.getBoundingClientRect().bottom || 90)+48);
+    this.renderer.boardBottom=30;
     this.renderer.calcGridOffset(window.innerWidth, window.innerHeight, this.editorGridW, this.editorGridH);
+    this.uiLayer.querySelector('.view-controls')?.remove(); this.viewControls();
   }
 
   private showScreen(screen: Screen): void {
@@ -212,14 +257,15 @@ class App {
   private renderMenu(): void {
     const home = document.createElement('div'); home.className = 'home';
     home.innerHTML = `<div class="home-top"><div class="brand">RE<b>—</b>LASER / 光路实验室</div><div class="eyebrow" style="margin:0">THINK. REFLECT. SOLVE.</div></div>
-      <div class="hero"><div><div class="eyebrow">一束光，无限可能</div><h1>改变方向。<br><strong>点亮答案。</strong></h1><p>旋转镜面，引导激光，击破每一个目标。<br>在光与反射之间，找到属于你的最优解。</p><div class="home-actions"></div><div class="home-stats"></div></div>
+      <div class="hero"><div><div class="eyebrow">一束光，无限可能</div><h1>改变方向。<br><strong>点亮答案。</strong></h1><p>将光转化为电，让信号唤醒巨构回路。<br>分光、传送、蓄能与同步，挑战 42 道谜题。</p><div class="home-actions"></div><div class="home-stats"></div></div>
       <div class="beam-art" aria-hidden="true"><svg viewBox="0 0 360 360"><defs><pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse"><path d="M60 0H0V60" fill="none" stroke="#304453"/></pattern><filter id="glow"><feGaussianBlur stdDeviation="5"/></filter></defs><rect width="360" height="360" rx="10" fill="url(#grid)"/><path d="M30 270H150V90H270V210" fill="none" stroke="#79ead1" stroke-width="8" filter="url(#glow)"/><path d="M30 270H150V90H270V210" fill="none" stroke="#79ead1" stroke-width="3"/><g stroke="#e8edff" stroke-width="6" stroke-linecap="round"><path d="M132 288l36-36M132 72l36 36M252 72l36 36"/></g><circle cx="30" cy="270" r="15" fill="#79ead1"/><path d="M25 263l12 7-12 7" fill="#19372f"/><rect x="251" y="191" width="38" height="38" rx="6" fill="#653d47" stroke="#ff9d96" stroke-width="2"/><path d="M262 202l16 16m0-16l-16 16" stroke="#ff9d96" stroke-width="2"/><g fill="#647991"><circle cx="30" cy="30" r="3"/><circle cx="330" cy="330" r="3"/></g></svg></div></div>
       <div class="home-footer"><span>01 / 旋转镜面，规划路线</span><span>02 / 蓄积能量，击破装甲</span><span>03 / 挑战三星，创造自己的关卡</span></div>`;
     const next = allLevels.find(l => !this.state.getBestStars(l.id)) || allLevels[0];
     const cleared = allLevels.filter(l => this.state.getBestStars(l.id) > 0).length;
     const start = this.createButton(cleared ? '继续挑战 →' : '开始第一束光 →', () => this.startLevel(next)); start.className = 'primary';
     home.querySelector('.home-actions')!.append(start, this.createButton('选择关卡', () => this.showScreen('LEVEL_SELECT')), this.createButton('玩法说明', () => this.showHelp()));
-    home.querySelector('.home-stats')!.innerHTML = `<div><strong>${cleared} / ${allLevels.length}</strong>已完成关卡</div><div><strong>${allLevels.reduce((n,l) => n + this.state.getBestStars(l.id), 0)}</strong>收集星星</div><div><strong>04</strong>主题章节</div>`;
+    home.querySelector('.home-stats')!.innerHTML = `<div><strong>${cleared} / ${allLevels.length}</strong>已完成关卡</div><div><strong>${allLevels.reduce((n,l) => n + this.state.getBestStars(l.id), 0)}</strong>收集星星</div><div><strong>${String(chaptersMeta.length).padStart(2,'0')}</strong>主题章节</div>`;
+    home.querySelector('.home-actions')!.append(this.createButton('新：光电实验室',()=>this.startLevel(allLevels.find(l=>l.id==='ch5-01')!)),this.createButton('巨构回路挑战 →',()=>this.startLevel(allLevels.find(l=>l.id==='ch6-01')!)));
     home.querySelector('.home-footer')!.append(this.createButton('创意工坊', () => this.showScreen('WORKSHOP')), this.createButton('导入关卡', () => this.showImportDialog()));
     this.uiLayer.append(home);
   }
@@ -234,8 +280,7 @@ class App {
       this.feedback = em.mode === EmitterMode.POWER ? '强力模式：蓄满 3 点能量后发射，可击破蓝色装甲。' : '普通模式：消耗 1 点能量，可连续击穿红色目标。';
       this.playTone(380);
     } else {
-      const fixed = game.mirrors.some(m => coordKey(m.coord) === coordKey(coord));
-      this.feedback = fixed ? '这是一面固定镜，无法旋转。' : '黄色电池自动供能；红色 × 是普通目标，蓝色 ◈ 需要强激光。';
+      this.feedback = deviceInfo(game,coord);
     }
     this.renderGameUI();
   }
@@ -246,7 +291,19 @@ class App {
   }
 
   private restart(): void {
-    if (this.state.currentLevel) this.startLevel(this.state.currentLevel);
+    if (this.state.currentLevel) this.startLevel(this.state.currentLevel,this.testingEditor);
+  }
+
+  private leaveGame(): void {
+    if(this.testingEditor) { this.showScreen('EDITOR'); this.renderEditorPreview(); }
+    else this.showScreen(this.state.currentLevel?.chapter ? 'LEVEL_SELECT' : 'WORKSHOP');
+  }
+
+  private viewControls(): void {
+    const view=document.createElement('div'); view.className='view-controls';
+    view.style.top=(this.renderer.boardTop+4)+'px';
+    for(const [text,action] of [['＋',()=>this.renderer.zoomBy(1.25)],['−',()=>this.renderer.zoomBy(.8)],['全图',()=>this.renderer.resetView()]] as const) view.append(this.createButton(text,action));
+    this.uiLayer.append(view);
   }
 
   private refreshPreview(): void {
@@ -281,6 +338,9 @@ class App {
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', '玩法说明');
     const card = document.createElement('div'); card.className = 'help-card';
     card.innerHTML = '<h2>让每一束光都有方向</h2><p>目标：在回合上限内清除所有红色和蓝色方块。回合越少，星级越高。</p><p>↻ 点击可旋转镜面切换 / 与 ＼，固定镜没有旋转标记。调整镜面不消耗回合。</p><p>⚡ 每次执行，电池提供能量。点击圆形发射器切换模式：普通光消耗 1 点；强光消耗 3 点，可以击破蓝色装甲。能量不足会保留并继续蓄积。</p><p>◎ 光路预览显示下一回合的真实结果。撤销可以恢复每一步，包括发射和蓄能，放心尝试。</p><p>键盘：空格执行 · Z 撤销 · R 重试 · P 预览。方向键选格，Enter 旋转或切换模式。</p>';
+    const advanced=document.createElement('div');
+    advanced.innerHTML='<p><b>光电元件</b>：ϟ 转电器吸收光（普通 +1 / 强光 +3），下回合沿金色导线供电。△ 散射器分成前、左、右三路，保留强度。</p><p><b>信号与开关</b>：单圈传感器每回合需重新点亮；双圈具有永久记忆。同字母传感器全部点亮，下一回合光闸开启。! 标记为反相：条件不成立时开启。</p><p><b>通关条件</b>：清除所有障碍，并在同一回合激活全部传感器。成对紫色传送门保留方向；单向光阀仅允许箭头方向通过。</p><p><b>大棋盘</b>：滚轮、双指或 + / − 缩放，拖动平移；全图按钮或 0 键复位。点选任何元件可查看状态。</p>';
+    card.append(advanced);
     const sound = this.createButton(this.soundEnabled ? '音效：开' : '音效：关', () => { this.soundEnabled = !this.soundEnabled; sound.textContent = this.soundEnabled ? '音效：开' : '音效：关'; });
     const close = () => { overlay.remove(); previousFocus?.focus(); };
     const done = this.createButton('明白了，开始思考', close); done.className = 'primary'; done.style.marginLeft = '12px';
@@ -397,6 +457,7 @@ class App {
     const nameDiv = document.createElement('div');
     nameDiv.style.cssText = 'font-size:13px;margin:4px 0';
     nameDiv.textContent = level.name;
+    btn.title = `${level.gridWidth}×${level.gridHeight} · ${level.elements.length} 个元件 · 三星 ${level.par} 回合`;
     btn.appendChild(nameDiv);
 
     const starsDiv = document.createElement('div');
@@ -411,7 +472,8 @@ class App {
     return btn;
   }
 
-  private startLevel(level: LevelData): void {
+  private startLevel(level: LevelData, fromEditor = false): void {
+    this.testingEditor=fromEditor; this.renderer.boardTop=130; this.renderer.boardBottom=160; this.renderer.resetView();
     this.renderer.clearEffects(); this.renderer.selectedCell = null;
     this.feedback = ''; this.previewEnabled = false; this.selected = { row: 0, col: 0 };
     this.state.loadLevel(level);
@@ -429,13 +491,13 @@ class App {
     const name = document.createElement('div'); name.className = 'game-title'; name.textContent = game.levelData.name;
     title.append(chapter, name); header.append(title);
     const meters = document.createElement('div'); meters.className = 'game-meters';
-    for (const [value, label] of [[`${game.turnState.turnCount}/${game.turnState.maxTurns}`, '使用回合'], [`${game.obstacles.filter(o => o.destroyed).length}/${game.obstacles.length}`, '清除目标'], [`≤ ${game.levelData.par}`, '三星目标']]) {
+    for (const [value, label] of [[`${game.turnState.turnCount}/${game.turnState.maxTurns}`, '使用回合'], [`${game.obstacles.filter(o => o.destroyed).length}/${game.obstacles.length}`, '清除目标'], [`≤ ${game.levelData.par}`, '三星目标'], ...(game.sensors.length ? [[`${game.sensors.filter(s=>s.active).length}/${game.sensors.length}`, '传感器']] : [])]) {
       const meter = document.createElement('div'); const strong = document.createElement('b'); strong.textContent = value;
       meter.append(strong, document.createTextNode(label)); meters.append(meter);
     }
     header.append(meters); this.uiLayer.append(header);
     const hint = document.createElement('div'); hint.className = 'game-hint';
-    hint.textContent = game.levelData.hint || '清除所有目标。点击镜子改变光路，点击发射器切换普通 / 强力模式。'; this.uiLayer.append(hint);
+    hint.textContent = game.levelData.hint || '清除全部障碍，并同时激活所有传感器。点选元件查看规则，拖动与缩放查看大棋盘。'; this.uiLayer.append(hint);
     const dock = document.createElement('div'); dock.className = 'game-dock';
     const feedback = document.createElement('div'); feedback.className = 'game-feedback'; feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
     feedback.textContent = this.feedback || '调整不消耗回合，准备好后执行。可以随时撤销。'; dock.append(feedback);
@@ -443,10 +505,10 @@ class App {
     const fire = this.createButton(this.executing ? '光束运行中…' : '⚡ 执行回合', () => this.executeTurn()); fire.className = 'primary'; fire.disabled = this.executing;
     const undo = this.createButton('↶ 撤销', () => this.undo()); undo.disabled = this.executing || !game.canUndo;
     const preview = this.createButton(this.previewEnabled ? '◉ 预览开' : '◎ 光路预览', () => this.togglePreview()); preview.disabled = this.executing; preview.setAttribute('aria-pressed', String(this.previewEnabled));
-    controls.append(fire, undo, preview, this.createButton('↻ 重试', () => this.restart()), this.createButton('?', () => this.showHelp()), this.createButton('退出', () => this.showScreen(game.levelData.chapter ? 'LEVEL_SELECT' : 'WORKSHOP')));
+    controls.append(fire, undo, preview, this.createButton('↻ 重试', () => this.restart()), this.createButton('?', () => this.showHelp()), this.createButton(this.testingEditor?'返回编辑器':'退出', () => this.leaveGame()));
     dock.append(controls);
-    const help = document.createElement('div'); help.className = 'game-help'; help.textContent = 'SPACE 执行 · Z 撤销 · P 预览 · R 重试 · 方向键选择 / ENTER 操作'; dock.append(help);
-    this.uiLayer.append(dock); this.refreshPreview();
+    const help = document.createElement('div'); help.className = 'game-help'; help.textContent = 'SPACE 执行 · Z 撤销 · P 预览 · 滚轮/双指缩放 · 拖动平移 · 0 全图'; dock.append(help);
+    this.uiLayer.append(dock); this.refreshPreview(); this.viewControls();
   }
 
   private executeTurn(): void {
@@ -457,6 +519,7 @@ class App {
     const delay = Math.min(1200, Math.max(300, totalSegs * 35)) + 180;
     const destroyed = results.reduce((sum, result) => sum + result.destroyedObstacles.length, 0);
     this.feedback = destroyed ? `命中！清除了 ${destroyed} 个目标。` : results.length ? '光束没有击中目标，试试调整镜面或切换强力模式。' : `正在蓄能：${game.emitters.map(e => `${e.receivedCharge}/${e.mode === EmitterMode.POWER ? 3 : 1}`).join(' · ')}。执行下一回合继续充电。`;
+    if(game.sensors.length) this.feedback += ` 传感器 ${game.sensors.filter(s=>s.active).length}/${game.sensors.length}；光闸按上一回合信号工作。`;
     this.playTone(destroyed ? 660 : results.length ? 330 : 220); this.renderGameUI();
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
@@ -506,7 +569,7 @@ class App {
     btnRow.style.cssText = 'display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;justify-content:center;';
 
     if (!isWin) {
-      const retryBtn = this.createButton('重新尝试', () => this.startLevel(level));
+      const retryBtn = this.createButton('重新尝试', () => this.startLevel(level, this.testingEditor));
       retryBtn.style.cssText += `background:${COLORS.laserNormal};color:#fff;padding:10px 28px;border:none;`;
       btnRow.appendChild(retryBtn);
     } else {
@@ -518,8 +581,9 @@ class App {
       }
     }
 
-    if (isWin) btnRow.appendChild(this.createButton('再挑战一次', () => this.startLevel(level)));
+    if (isWin) btnRow.appendChild(this.createButton('再挑战一次', () => this.startLevel(level, this.testingEditor)));
     if (!isWin && game.canUndo) btnRow.appendChild(this.createButton('撤销最后一步', () => { game.undo(); this.renderer.clearEffects(); this.feedback = '已回到上一步，换个思路再试。'; this.showScreen('PLAYING'); }));
+    if(this.testingEditor) btnRow.append(this.createButton('返回编辑器',()=>this.leaveGame()));
     const backBtn = this.createButton('关卡选择', () => this.showScreen('LEVEL_SELECT'));
     btnRow.appendChild(backBtn);
     panel.appendChild(btnRow);
@@ -647,6 +711,7 @@ class App {
       this.editingLevelId = null;
     }
 
+    this.renderer.resetView();
     this.editorTool = 'battery';
     this.state.goToScreen('EDITOR');
     this.renderEditor();
@@ -660,7 +725,7 @@ class App {
     panel.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;display:flex;flex-direction:column;';
 
     // Toolbar
-    const toolbar = document.createElement('div');
+    const toolbar = document.createElement('div'); toolbar.className='editor-tools';
     toolbar.style.cssText = `background:${COLORS.uiPanel};border-bottom:1px solid ${COLORS.uiPanelBorder};padding:8px 16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;`;
 
     const backBtn = this.createButton('← 返回', () => this.showScreen('WORKSHOP'));
@@ -676,6 +741,9 @@ class App {
     // Tool buttons
     const tools: { label: string; tool: ElementPlacement['type'] | 'erase' }[] = [
       { label: '⌫ 擦除', tool: 'erase' },
+      { label: 'ϟ 转电器', tool: 'converter' }, { label: '─ 导线', tool: 'wire' },
+      { label: '△ 散射器', tool: 'splitter' }, { label: '◎ 传感器', tool: 'sensor' },
+      { label: '▥ 自动开关', tool: 'gate' }, { label: '◉ 传送门', tool: 'portal' }, { label: '▷ 单向光阀', tool: 'diode' },
       { label: '🔋 电池', tool: 'battery' },
       { label: '📡 发射器', tool: 'emitter' },
       { label: '🪞 镜子', tool: 'mirror' },
@@ -701,6 +769,23 @@ class App {
     separator2.style.cssText = 'width:1px;height:24px;background:#3a3a5e;margin:0 4px;';
     toolbar.appendChild(separator2);
 
+    const channelLabel=document.createElement('label'); channelLabel.textContent='通道 ';
+    const channel=document.createElement('select'); channel.setAttribute('aria-label','元件信号通道');
+    for(const value of ['A','B','C','D','P','Z']) { const option=document.createElement('option');option.value=option.textContent=value;channel.append(option); }
+    channel.value=this.editorChannel;channel.onchange=()=>{this.editorChannel=channel.value;};channelLabel.append(channel);toolbar.append(channelLabel);
+    const dimensions=document.createElement('select'); dimensions.setAttribute('aria-label','棋盘尺寸');
+    const sizes=[...new Set([this.editorGridW+'×'+this.editorGridH,'8×6','12×10','16×12','20×16'])];
+    for(const size of sizes){const option=document.createElement('option');option.value=option.textContent=size;dimensions.append(option);}
+    dimensions.onchange=()=>{
+      const [w,h]=dimensions.value.split('×').map(Number);
+      if(this.editorElements.some(e=>e.coord.col>=w || e.coord.row>=h)){alert('请先擦除新边界之外的元件，再缩小棋盘。');dimensions.value=this.editorGridW+'×'+this.editorGridH;return;}
+      this.editorGridW=w;this.editorGridH=h;this.renderer.resetView();this.renderEditorPreview();
+    };toolbar.append(dimensions);
+    for(const [label,key] of [['回合上限','editorMaxTurns'],['三星回合','editorPar']] as const){
+      const field=document.createElement('label');field.textContent=label+' ';const input=document.createElement('input');input.type='number';input.min='1';input.max='100';input.value=String(this[key]);input.style.width='52px';input.setAttribute('aria-label',label);
+      input.onchange=()=>{this[key]=Math.max(1,Math.min(100,Math.round(Number(input.value)||1)));input.value=String(this[key]);this.renderEditorPreview();};field.append(input);toolbar.append(field);
+    }
+    toolbar.append(this.createButton('试玩',()=>{const level=this.buildEditorLevel();if(level)this.startLevel(level,true);}));
     // Clear button
     const clearBtn = this.createButton('清空', () => {
       this.editorElements = [];
@@ -754,7 +839,7 @@ class App {
     toolbar.appendChild(saveBtn);
 
     const tip = document.createElement('div');
-    tip.textContent = '选择工具后点棋盘放置 · 重复点击发射器转向、镜子旋转、障碍切换装甲 · 擦除可删除单格';
+    tip.textContent = '重复点选：发射器/光阀转向，传感器切换记忆，光闸切换反相。通道匹配才能联动；同通道传送门需恰好两扇。';
     tip.style.cssText = 'padding:8px 16px;color:#a1abc3;font-size:12px;line-height:1.6;';
     panel.appendChild(toolbar); panel.appendChild(tip);
 
@@ -784,14 +869,14 @@ class App {
   private buildEditorLevel(): LevelData | null {
     const hasBattery = this.editorElements.some(e => e.type === 'battery');
     const hasEmitter = this.editorElements.some(e => e.type === 'emitter');
-    const hasObstacle = this.editorElements.some(e => e.type === 'obstacle');
+    const hasObstacle = this.editorElements.some(e => e.type === 'obstacle' || e.type === 'sensor');
 
     if (!hasBattery || !hasEmitter || !hasObstacle) {
-      alert('关卡至少需要包含：电池、发射器、障碍物');
+      alert('关卡需要电池、发射器，以及至少一个障碍或传感器目标');
       return null;
     }
 
-    return {
+    const level: LevelData = {
       id: this.editingLevelId || `custom-${Date.now()}`,
       name: this.editorLevelName || '自定义关卡',
       chapter: 0,
@@ -800,8 +885,10 @@ class App {
       gridHeight: this.editorGridH,
       maxTurns: this.editorMaxTurns,
       par: this.editorPar,
-      elements: this.editorElements,
+      elements: this.editorElements.map(e=>({...e,coord:{...e.coord}})),
     };
+    if(!isLevelData(level)){alert('检查关卡设置：三星回合不能超过上限；同通道传送门必须恰好两扇；每道光闸需要同通道传感器。');return null;}
+    return level;
   }
 
   // ── UI Helpers ──

@@ -3,6 +3,7 @@ import { MirrorOrientation, EmitterMode, ObstacleType } from '../types/elements'
 import { LaserTraceResult } from '../types/game';
 import { COLORS, RENDER } from '../constants';
 import { Game } from '../models/Game';
+import { drawCircuits } from './CircuitRenderer';
 
 interface Particle {
   x: number; y: number;
@@ -21,6 +22,20 @@ export class Renderer {
   cellSize: number = RENDER.cellSize;
   previewResults: LaserTraceResult[] = [];
   selectedCell: Coord | null = null;
+  boardTop = 130;
+  boardBottom = 160;
+  private zoom = 1;
+  private panX = 0;
+  private panY = 0;
+  private layout = { width: 0, height: 0, cols: 0, rows: 0 };
+
+  resetView(): void { this.zoom = 1; this.panX = 0; this.panY = 0; this.relayout(); }
+  zoomBy(factor: number): void { this.zoom = Math.max(1, Math.min(4, this.zoom * factor)); this.relayout(); }
+  panBy(x: number, y: number): void { this.panX += x; this.panY += y; this.relayout(); }
+  private relayout(): void {
+    const {width,height,cols,rows} = this.layout;
+    if (cols && rows) this.calcGridOffset(width,height,cols,rows);
+  }
 
   clearEffects(): void {
     this.currentLaserResults = [];
@@ -60,9 +75,14 @@ export class Renderer {
   }
 
   calcGridOffset(canvasW: number, canvasH: number, gridW: number, gridH: number): void {
-    this.cellSize = Math.max(12, Math.min(RENDER.cellSize, Math.floor((canvasW - 40) / gridW), Math.floor((canvasH - 260) / gridH)));
-    this.gridOffsetX = Math.round((canvasW - gridW * this.cellSize) / 2);
-    this.gridOffsetY = Math.max(130, Math.round((canvasH - gridH * this.cellSize) / 2));
+    this.layout = { width:canvasW, height:canvasH, cols:gridW, rows:gridH };
+    const availableHeight = Math.max(80, canvasH - this.boardTop - this.boardBottom);
+    this.cellSize = Math.max(4, Math.min(RENDER.cellSize, Math.floor((canvasW - 40) / gridW), Math.floor(availableHeight / gridH))) * this.zoom;
+    const maxX = Math.max(0,(gridW*this.cellSize-canvasW+80)/2);
+    const maxY = Math.max(0,(gridH*this.cellSize-availableHeight)/2);
+    this.panX=Math.max(-maxX,Math.min(maxX,this.panX)); this.panY=Math.max(-maxY,Math.min(maxY,this.panY));
+    this.gridOffsetX = Math.round((canvasW - gridW * this.cellSize) / 2 + this.panX);
+    this.gridOffsetY = Math.round(this.boardTop + (availableHeight - gridH * this.cellSize) / 2 + this.panY);
   }
 
   pixelToGrid(px: number, py: number): Coord | null {
@@ -164,7 +184,7 @@ export class Renderer {
     // Clear
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
-
+    ctx.save(); ctx.beginPath(); ctx.rect(0,this.boardTop,w,Math.max(0,h-this.boardTop-this.boardBottom)); ctx.clip();
     this.drawGrid(game);
     if (this.selectedCell && game.grid.inBounds(this.selectedCell)) {
       const p = this.gridToPixel(this.selectedCell);
@@ -174,9 +194,11 @@ export class Renderer {
       ctx.strokeRect(p.x - this.cellSize / 2 + 2, p.y - this.cellSize / 2 + 2, this.cellSize - 4, this.cellSize - 4);
     }
     this.drawElements(game, timestamp);
+    drawCircuits(ctx,game,this.cellSize,this.gridOffsetX,this.gridOffsetY);
     this.drawPreview();
     this.drawLasers(game);
     this.drawParticles();
+    ctx.restore();
   }
 
   private drawGrid(game: Game): void {

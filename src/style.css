@@ -3,6 +3,21 @@
   --mint:#79ead1;
   --muted:#a1abc3
 }
+
+.view-controls { position:absolute; right:16px; display:flex; gap:5px; pointer-events:auto; z-index:5; }
+.view-controls button { min-height:30px; padding:4px 9px!important; font-size:12px!important; background:#202b3de6!important; border-radius:7px!important; }
+.editor-tools { max-height:30vh; overflow:auto; }
+.editor-tools label { font-size:11px; color:#c8d3e4; }
+.editor-tools select,.editor-tools input { background:#171f30; color:#e6ecff; border:1px solid #50617b; padding:5px; border-radius:5px; }
+.game-feedback { max-height:66px; overflow:auto; }
+@media(max-width:650px) {
+  .game-header { align-items:flex-start; }
+  .game-meters { gap:8px; font-size:10px; }
+  .game-meters b { font-size:16px; }
+  .game-title { max-width:125px; }
+  .game-sub { font-size:9px; letter-spacing:1px; }
+  .view-controls { right:8px; }
+}
 button,input,textarea,select {
   font:inherit
 }

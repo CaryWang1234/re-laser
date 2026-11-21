@@ -19,6 +19,13 @@ export enum CellType {
   FIXED_MIRROR = 'FIXED_MIRROR',
   OBSTACLE = 'OBSTACLE',
   REINFORCED_OBSTACLE = 'REINFORCED_OBSTACLE',
+  WIRE = 'WIRE',
+  CONVERTER = 'CONVERTER',
+  SPLITTER = 'SPLITTER',
+  SENSOR = 'SENSOR',
+  GATE = 'GATE',
+  PORTAL = 'PORTAL',
+  DIODE = 'DIODE',
 }
 
 export function coordsEqual(a: Coord, b: Coord): boolean {

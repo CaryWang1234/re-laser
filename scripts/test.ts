@@ -7,6 +7,8 @@ import { solveLevel } from '../src/workshop/Solver';
 import { encodeLevel, decodeLevel } from '../src/workshop/ShareCodec';
 import { CellType } from '../src/types';
 import { writeFileSync } from 'node:fs';
+import { circuitPlans, applyEdits } from './circuit-plans';
+import './circuit-rules';
 
 const power = new Game(allLevels.find(l => l.id === 'ch1-05')!);
 power.toggleEmitterMode(power.emitters[0].coord);
@@ -46,6 +48,26 @@ const solutions: Record<string, number[]> = {};
 for (const level of allLevels) {
   assert.ok(isLevelData(level), `${level.id}: invalid or overlapping elements`);
   const game = new Game(level);
+  const plan = circuitPlans[level.id];
+  if (plan) {
+    for (const edits of plan) {
+      assert.equal(game.result, null, `${level.id}: plan contains extra turns`);
+      applyEdits(game, edits);
+      const before = game.snapshot();
+      game.preview();
+      assert.equal(game.snapshot(), before, `${level.id}: preview mutated circuit state`);
+      game.fire();
+      const after = game.snapshot();
+      game.undo();
+      assert.equal(game.snapshot(), before, `${level.id}: circuit undo incomplete`);
+      game.fire();
+      assert.equal(game.snapshot(), after, `${level.id}: circuit replay is not deterministic`);
+    }
+    assert.equal(game.result, 'WIN', `${level.id}: scripted solution failed; ${game.snapshot()}`);
+    assert.ok(game.turnState.turnCount <= level.par, `${level.id}: three stars unreachable`);
+    console.log(`${level.id}: circuit WIN in ${game.turnState.turnCount} turns`);
+    continue;
+  }
   const mirrorCount = game.mirrors.filter(m => m.rotatable).length;
   const choices = mirrorCount + game.emitters.length;
   const actions: number[] = [];
@@ -73,4 +95,4 @@ function apply(game: Game, mask: number) {
   game.emitters.forEach((e,i) => e.mode = mask & (1<<(i+mirrors.length)) ? EmitterMode.POWER : EmitterMode.NORMAL);
 }
 writeFileSync('.checks/solutions.json', JSON.stringify(solutions,null,2));
-console.log('PASS: all 30 levels have replayable wins; charging, preview, undo, laser continuity, solver and import checks passed.');
+console.log(`PASS: all ${allLevels.length} levels have replayable wins; charging, preview, undo, laser continuity, circuits, solver and import checks passed.`);

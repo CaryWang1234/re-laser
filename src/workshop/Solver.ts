@@ -7,7 +7,7 @@ export type SolveResult = 'solvable' | 'unsolvable' | 'unknown';
 /** Uses the real game rules. A budget limit is never reported as proof of failure. */
 export function solveLevel(level: LevelData, maxTransitions = 30000): SolveResult {
   const initial = new Game(level);
-  if (!initial.obstacles.length || !initial.emitters.length) return 'unsolvable';
+  if ((!initial.obstacles.length && !initial.sensors.length) || !initial.emitters.length) return 'unsolvable';
   const mirrors = initial.mirrors.filter(m => m.rotatable).length;
   const choices = mirrors + initial.emitters.length;
   if (choices > 12) return 'unknown';
@@ -30,7 +30,7 @@ export function solveLevel(level: LevelData, maxTransitions = 30000): SolveResul
       if (game.result === 'WIN') return 'solvable';
       if (game.result === 'LOSE') continue;
       // Mirror orientations and modes can be freely changed before the next turn.
-      const key = JSON.stringify([game.obstacles.map(o => o.destroyed), game.batteries.map(b => b.currentCharge), game.emitters.map(e => e.receivedCharge)]);
+      const key = JSON.stringify([game.obstacles.map(o => o.destroyed), game.batteries.map(b => b.currentCharge), game.emitters.map(e => e.receivedCharge), game.converters.map(c => c.currentCharge), game.sensors.map(s => s.active)]);
       if (visited.has(key)) continue;
       visited.add(key);
       queue.push(game.snapshot());

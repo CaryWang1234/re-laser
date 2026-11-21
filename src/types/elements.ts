@@ -49,6 +49,20 @@ export interface WallData {
   coord: Coord;
 }
 
+export interface ConverterData extends BatteryData {}
+export interface SensorData {
+  coord: Coord;
+  channel: string;
+  latched: boolean;
+  active: boolean;
+}
+export interface GateData {
+  coord: Coord;
+  channel: string;
+  inverted: boolean;
+  open: boolean;
+}
+
 export type GameElement =
   | { kind: 'battery'; data: BatteryData }
   | { kind: 'emitter'; data: EmitterData }

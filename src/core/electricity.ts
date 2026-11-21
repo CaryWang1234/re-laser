@@ -1,5 +1,5 @@
 import { Coord, coordKey, ALL_DIRECTIONS, Direction, CellType } from '../types';
-import { BatteryData, EmitterData } from '../types/elements';
+import { BatteryData, EmitterData, ConverterData } from '../types/elements';
 import { Grid } from './grid';
 import { RULES } from '../constants';
 
@@ -7,6 +7,7 @@ export function simulateElectricity(
   grid: Grid,
   batteries: BatteryData[],
   emitters: EmitterData[],
+  converters: ConverterData[] = [],
 ): void {
   for (const e of emitters) {
     e.hasFired = false;
@@ -17,10 +18,11 @@ export function simulateElectricity(
     emitterMap.set(coordKey(e.coord), e);
   }
 
-  const batteryCoords = new Set(batteries.map(b => coordKey(b.coord)));
+  const sources = [...batteries, ...converters];
+  const batteryCoords = new Set(sources.map(b => coordKey(b.coord)));
 
-  for (const battery of batteries) {
-    battery.currentCharge = Math.min(battery.capacity, battery.currentCharge + RULES.chargePerTurn);
+  for (const battery of sources) {
+    if (batteries.includes(battery)) battery.currentCharge = Math.min(battery.capacity, battery.currentCharge + RULES.chargePerTurn);
 
     const visited = new Set<string>();
     const queue: Coord[] = [battery.coord];
@@ -47,7 +49,7 @@ export function simulateElectricity(
             emitter.receivedCharge += 1;
             battery.currentCharge -= 1;
           }
-        } else if (cellType === CellType.BATTERY && batteryCoords.has(key)) {
+        } else if (cellType === CellType.WIRE || batteryCoords.has(key)) {
           queue.push(neighbor);
         }
       }

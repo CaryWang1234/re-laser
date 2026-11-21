@@ -6,7 +6,14 @@ export type ElementPlacement =
   | { type: 'emitter'; coord: Coord; facing: Direction; initialMode: EmitterMode }
   | { type: 'mirror'; coord: Coord; orientation: MirrorOrientation; rotatable: boolean }
   | { type: 'obstacle'; coord: Coord; obstacleType: ObstacleType }
-  | { type: 'wall'; coord: Coord };
+  | { type: 'wall'; coord: Coord }
+  | { type: 'wire'; coord: Coord }
+  | { type: 'converter'; coord: Coord; capacity: number }
+  | { type: 'splitter'; coord: Coord }
+  | { type: 'sensor'; coord: Coord; channel: string; latched: boolean }
+  | { type: 'gate'; coord: Coord; channel: string; inverted: boolean }
+  | { type: 'portal'; coord: Coord; channel: string }
+  | { type: 'diode'; coord: Coord; facing: Direction };
 
 export interface LevelData {
   id: string;

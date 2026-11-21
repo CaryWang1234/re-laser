@@ -2,7 +2,7 @@ import { Coord, CellType, coordKey } from '../types';
 import {
   BatteryData, EmitterData, EmitterMode,
   MirrorData, MirrorOrientation,
-  ObstacleData, ObstacleType,
+  ObstacleData, ObstacleType, ConverterData, SensorData, GateData,
 } from '../types/elements';
 import { LevelData, ElementPlacement } from '../types/level';
 import { LaserTraceResult, GameResult } from '../types/game';
@@ -20,6 +20,9 @@ export class Game {
   emitters: EmitterData[] = [];
   mirrors: MirrorData[] = [];
   obstacles: ObstacleData[] = [];
+  converters: ConverterData[] = [];
+  sensors: SensorData[] = [];
+  gates: GateData[] = [];
   turnState: TurnState;
   laserResults: LaserTraceResult[] = [];
   result: GameResult = null;
@@ -31,13 +34,15 @@ export class Game {
   snapshot(): string {
     return JSON.stringify({ batteries: this.batteries, emitters: this.emitters,
       mirrors: this.mirrors, obstacles: this.obstacles, turnState: this.turnState,
-      laserResults: this.laserResults, result: this.result });
+      laserResults: this.laserResults, result: this.result,
+      converters: this.converters, sensors: this.sensors, gates: this.gates });
   }
 
   restore(snapshot: string): void {
     const data = JSON.parse(snapshot);
     this.grid = new Grid(this.levelData.gridWidth, this.levelData.gridHeight);
     this.batteries = []; this.emitters = []; this.mirrors = []; this.obstacles = [];
+    this.converters = []; this.sensors = []; this.gates = [];
     this.loadElements(this.levelData.elements);
     Object.assign(this, data);
     for (const obstacle of this.obstacles) {
@@ -72,6 +77,19 @@ export class Game {
   private loadElements(elements: ElementPlacement[]): void {
     for (const el of elements) {
       switch (el.type) {
+        case 'converter':
+          this.converters.push({ id: genId('conv'), coord: el.coord, capacity: el.capacity, currentCharge: 0 });
+          this.grid.setCellType(el.coord, CellType.CONVERTER); break;
+        case 'sensor':
+          this.sensors.push({ ...el, active: false });
+          this.grid.setCellType(el.coord, CellType.SENSOR); break;
+        case 'gate':
+          this.gates.push({ ...el, open: el.inverted });
+          this.grid.setCellType(el.coord, CellType.GATE); break;
+        case 'wire': this.grid.setCellType(el.coord, CellType.WIRE); break;
+        case 'splitter': this.grid.setCellType(el.coord, CellType.SPLITTER); break;
+        case 'portal': this.grid.setCellType(el.coord, CellType.PORTAL); break;
+        case 'diode': this.grid.setCellType(el.coord, CellType.DIODE); break;
         case 'battery': {
           this.batteries.push({
             id: genId('bat'), coord: el.coord, capacity: el.capacity, currentCharge: 0,
@@ -138,9 +156,10 @@ export class Game {
 
     this.laserResults = executeTurn(
       this.grid, this.batteries, this.emitters, this.mirrors, this.obstacles, this.turnState,
+      { converters: this.converters, sensors: this.sensors, gates: this.gates, elements: this.levelData.elements },
     );
 
-    this.result = checkGameResult(this.obstacles, this.turnState);
+    this.result = checkGameResult(this.obstacles, this.turnState, this.sensors);
     this.turnState.phase = this.result === null ? 'PLAYER_ACTION' : 'DONE';
 
     return this.laserResults;
@@ -154,6 +173,7 @@ export class Game {
     this.emitters = [];
     this.mirrors = [];
     this.obstacles = [];
+    this.converters = []; this.sensors = []; this.gates = [];
     this.laserResults = [];
     this.result = null;
     this.turnState = { turnCount: 0, maxTurns: this.levelData.maxTurns, phase: 'PLAYER_ACTION' };

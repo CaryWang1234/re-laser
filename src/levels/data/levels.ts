@@ -1,5 +1,6 @@
 ﻿import { LevelData } from '../../types/level';
 import { Direction } from '../../types';
+import { chapter5, chapter6 } from './circuits';
 import { EmitterMode, MirrorOrientation, ObstacleType } from '../../types/elements';
 
 export const chapter1: LevelData[] = [
@@ -461,13 +462,15 @@ export const chapter4: LevelData[] = [
   },
 ];
 
-export const allLevels: LevelData[] = [...chapter1, ...chapter2, ...chapter3, ...chapter4];
+export const allLevels: LevelData[] = [...chapter1, ...chapter2, ...chapter3, ...chapter4, ...chapter5, ...chapter6];
 
 export const chaptersMeta = [
   { name: '基础教学', levels: chapter1 },
   { name: '镜子操控', levels: chapter2 },
   { name: '电力管理', levels: chapter3 },
   { name: '综合挑战', levels: chapter4 },
+  { name: '光电实验室 · 新机制', levels: chapter5 },
+  { name: '巨构回路 · 联动挑战', levels: chapter6 },
 ];
 
 

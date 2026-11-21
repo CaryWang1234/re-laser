@@ -6,6 +6,15 @@ import { Grid } from './grid';
 import { simulateElectricity } from './electricity';
 import { traceLaser, TraceContext } from './laser';
 import { checkWin, checkLose } from './rules';
+import { ConverterData, SensorData, GateData } from '../types/elements';
+import { ElementPlacement } from '../types/level';
+
+export interface CircuitState {
+  converters: ConverterData[];
+  sensors: SensorData[];
+  gates: GateData[];
+  elements: ElementPlacement[];
+}
 
 export type TurnPhase = 'PLAYER_ACTION' | 'EXECUTING' | 'DONE';
 
@@ -22,8 +31,15 @@ export function executeTurn(
   mirrors: MirrorData[],
   obstacles: ObstacleData[],
   turnState: TurnState,
+  circuit?: CircuitState,
 ): LaserTraceResult[] {
-  simulateElectricity(grid, batteries, emitters);
+  // Signals sampled at the start of a turn; light cannot feed back in the same turn.
+  for (const gate of circuit?.gates || []) {
+    const sources = circuit!.sensors.filter(s => s.channel === gate.channel);
+    const active = sources.length > 0 && sources.every(s => s.active);
+    gate.open = gate.inverted ? !active : active;
+  }
+  simulateElectricity(grid, batteries, emitters, circuit?.converters);
 
   const mirrorOrientations = new Map<string, MirrorOrientation>();
   for (const m of mirrors) {
@@ -40,7 +56,10 @@ export function executeTurn(
     if (o.destroyed) destroyedSet.add(coordKey(o.coord));
   }
 
-  const ctx: TraceContext = { grid, mirrorOrientations, obstacleTypes, destroyedObstacles: destroyedSet };
+  const ctx: TraceContext = { grid, mirrorOrientations, obstacleTypes, destroyedObstacles: destroyedSet,
+    devices: new Map((circuit?.elements || []).map(e => [coordKey(e.coord), e])),
+    openGates: new Set((circuit?.gates || []).filter(g => g.open).map(g => coordKey(g.coord))),
+    converterHits: new Map(), litSensors: new Set() };
 
   const results: LaserTraceResult[] = [];
 
@@ -66,6 +85,12 @@ export function executeTurn(
     }
   }
 
+  for (const converter of circuit?.converters || []) {
+    converter.currentCharge = Math.min(converter.capacity, converter.currentCharge + (ctx.converterHits!.get(coordKey(converter.coord)) || 0));
+  }
+  for (const sensor of circuit?.sensors || []) {
+    sensor.active = (sensor.latched && sensor.active) || ctx.litSensors!.has(coordKey(sensor.coord));
+  }
   turnState.turnCount++;
 
   return results;
@@ -74,8 +99,9 @@ export function executeTurn(
 export function checkGameResult(
   obstacles: ObstacleData[],
   turnState: TurnState,
+  sensors: SensorData[] = [],
 ): 'WIN' | 'LOSE' | null {
-  if (checkWin(obstacles)) return 'WIN';
-  if (checkLose(turnState.turnCount, turnState.maxTurns, obstacles)) return 'LOSE';
+  if ((obstacles.length > 0 || sensors.length > 0) && checkWin(obstacles) && sensors.every(s => s.active)) return 'WIN';
+  if (turnState.turnCount >= turnState.maxTurns) return 'LOSE';
   return null;
 }
